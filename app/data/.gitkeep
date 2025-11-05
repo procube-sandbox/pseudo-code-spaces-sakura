@@ -1,0 +1,2 @@
+# This directory will contain SQLite database files
+# .gitignore will prevent database files from being committed

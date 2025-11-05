@@ -1,0 +1,6 @@
+# Workspace configurations will be dynamically added here
+# Example:
+# location /username/workspaces/workspace-name/ {
+#     proxy_pass http://localhost:PORT/;
+#     ...
+# }

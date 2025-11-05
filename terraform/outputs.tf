@@ -1,0 +1,27 @@
+output "server_ip" {
+  description = "Global IP address of the server"
+  value       = sakuracloud_server.main.ip_address
+}
+
+output "server_id" {
+  description = "Server ID"
+  value       = sakuracloud_server.main.id
+}
+
+output "ssh_command" {
+  description = "SSH command to connect to the server"
+  value       = "ssh ubuntu@${sakuracloud_server.main.ip_address}"
+}
+
+output "service_url" {
+  description = "Service URL (after DNS is configured)"
+  value       = "https://${var.domain}"
+}
+
+output "ansible_inventory" {
+  description = "Ansible inventory entry"
+  value       = <<-EOT
+    [pseudo_codespaces]
+    ${sakuracloud_server.main.ip_address} ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/id_rsa
+  EOT
+}

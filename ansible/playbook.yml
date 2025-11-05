@@ -1,0 +1,140 @@
+---
+- name: Setup Pseudo CodeSpaces Server
+  hosts: all
+  become: true
+  gather_facts: true
+
+  vars:
+    app_dir: /opt/pseudo-codespaces
+    domain: "{{ lookup('ansible.builtin.env', 'DOMAIN') }}"
+    github_client_id: "{{ lookup('ansible.builtin.env', 'GITHUB_CLIENT_ID') }}"
+    github_client_secret: "{{ lookup('ansible.builtin.env', 'GITHUB_CLIENT_SECRET') }}"
+    email: "admin@{{ domain }}"
+
+  tasks:
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Install required system packages
+      ansible.builtin.apt:
+        name:
+          - git
+          - curl
+          - certbot
+          - python3-certbot-nginx
+        state: present
+
+    - name: Ensure Docker is running
+      ansible.builtin.systemd:
+        name: docker
+        state: started
+        enabled: true
+
+    - name: Create application directory
+      ansible.builtin.file:
+        path: "{{ app_dir }}"
+        state: directory
+        owner: ubuntu
+        group: ubuntu
+        mode: '0755'
+
+    - name: Create required subdirectories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: ubuntu
+        group: ubuntu
+        mode: '0755'
+      loop:
+        - "{{ app_dir }}/app"
+        - "{{ app_dir }}/nginx"
+        - "{{ app_dir }}/nginx/conf.d"
+        - "{{ app_dir }}/data"
+        - "{{ app_dir }}/ssl"
+        - "{{ app_dir }}/workspaces"
+
+    - name: Copy application files
+      ansible.builtin.copy:
+        src: "{{ item.src }}"
+        dest: "{{ item.dest }}"
+        owner: ubuntu
+        group: ubuntu
+        mode: '0644'
+      loop:
+        - {src: '../app/', dest: '{{ app_dir }}/app/'}
+        - {src: '../docker/', dest: '{{ app_dir }}/'}
+        - {src: '../nginx/', dest: '{{ app_dir }}/nginx/'}
+
+    - name: Create environment file
+      ansible.builtin.template:
+        src: templates/env.j2
+        dest: "{{ app_dir }}/.env"
+        owner: ubuntu
+        group: ubuntu
+        mode: '0600'
+
+    - name: Stop system nginx for SSL certificate generation
+      ansible.builtin.systemd:
+        name: nginx
+        state: stopped
+      register: nginx_stop
+      failed_when: nginx_stop.failed and 'not be found' not in nginx_stop.msg
+
+    - name: Stop any existing nginx containers for SSL certificate generation
+      community.docker.docker_compose_v2:
+        project_src: "{{ app_dir }}"
+        state: stopped
+      register: docker_stop
+      failed_when: false
+
+    - name: Obtain SSL certificate with certbot
+      ansible.builtin.command:
+        cmd: >
+          certbot certonly --standalone --non-interactive --agree-tos
+          --email {{ email }} -d {{ domain }}
+        creates: /etc/letsencrypt/live/{{ domain }}/fullchain.pem
+
+    - name: Copy SSL certificates to app directory
+      ansible.builtin.copy:
+        src: "/etc/letsencrypt/live/{{ domain }}/{{ item }}"
+        dest: "{{ app_dir }}/ssl/{{ item }}"
+        owner: ubuntu
+        group: ubuntu
+        mode: '0644'
+        remote_src: true
+      loop:
+        - fullchain.pem
+        - privkey.pem
+
+    - name: Set up certbot renewal cron job
+      ansible.builtin.cron:
+        name: "Renew Let's Encrypt certificates"
+        minute: "0"
+        hour: "3"
+        day: "*/7"
+        job: "certbot renew --quiet --deploy-hook 'docker exec nginx nginx -s reload'"
+        user: root
+
+    - name: Build and start Docker containers
+      community.docker.docker_compose_v2:
+        project_src: "{{ app_dir }}"
+        build: always
+        state: present
+      become: true
+      become_user: ubuntu
+      environment:
+        DOMAIN: "{{ domain }}"
+        GITHUB_CLIENT_ID: "{{ github_client_id }}"
+        GITHUB_CLIENT_SECRET: "{{ github_client_secret }}"
+
+    - name: Wait for application to be ready
+      ansible.builtin.wait_for:
+        port: 443
+        delay: 10
+        timeout: 60
+
+    - name: Display service information
+      ansible.builtin.debug:
+        msg: "Service is now available at https://{{ domain }}"
