@@ -144,6 +144,7 @@
 
         .workspace-actions {
             display: flex;
+            flex-wrap: wrap;
             gap: 8px;
         }
 
@@ -196,6 +197,24 @@
 
         .btn-danger:hover:not(:disabled) {
             background: #dc2626;
+        }
+
+        .btn-info {
+            background: #06b6d4;
+            color: white;
+        }
+
+        .btn-info:hover:not(:disabled) {
+            background: #0891b2;
+        }
+
+        .btn-secondary {
+            background: #6b7280;
+            color: white;
+        }
+
+        .btn-secondary:hover:not(:disabled) {
+            background: #4b5563;
         }
 
         .modal {
@@ -463,6 +482,7 @@
             const canStart = ws.status === 'stopped';
             const canStop = ws.status === 'running';
             const canDelete = ['stopped', 'failed'].includes(ws.status);
+            const isFailed = ws.status === 'failed';
             
             return `
                 <div class="workspace-card ${isProcessing ? 'pulse' : ''}">
@@ -480,18 +500,29 @@
                         </button>
                         <button class="btn btn-success" 
                                 onclick="startWorkspace(${ws.id})" 
-                                ${!canStart ? 'disabled' : ''}>
+                                ${!canStart || isFailed ? 'disabled' : ''}>
                             起動
                         </button>
                         <button class="btn btn-warning" 
                                 onclick="stopWorkspace(${ws.id})" 
-                                ${!canStop ? 'disabled' : ''}>
+                                ${!canStop || isFailed ? 'disabled' : ''}>
                             停止
                         </button>
                         <button class="btn btn-danger" 
                                 onclick="deleteWorkspace(${ws.id})" 
                                 ${!canDelete ? 'disabled' : ''}>
                             削除
+                        </button>
+                        <div style="width: 100%; height: 0;"></div>
+                        <button class="btn btn-info" 
+                                onclick="rebuildWorkspace(${ws.id})"
+                                ${isProcessing ? 'disabled' : ''}>
+                            再ビルド
+                        </button>
+                        <button class="btn btn-secondary" 
+                                onclick="downloadBuildLog(${ws.id}, '${ws.name}')"
+                                ${isProcessing ? 'disabled' : ''}>
+                            ログ
                         </button>
                     </div>
                 </div>
@@ -577,7 +608,7 @@
 
         // Open workspace
         function openWorkspace(name) {
-            window.open(`/${currentUser.username}/workspaces/${name}/`, '_blank');
+            window.open(`/${currentUser.username}/workspaces/${name}/?folder=/workspaces/${name}`, '_blank');
         }
 
         // Start workspace
@@ -645,6 +676,37 @@
             .catch(error => {
                 console.error('Error deleting workspace:', error);
             });
+        }
+
+        // Rebuild workspace
+        function rebuildWorkspace(id) {
+            if (!confirm('このワークスペースを再ビルドしますか？')) {
+                return;
+            }
+            
+            fetch(`/api/workspaces/${id}/rebuild`, {
+                method: 'POST'
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(err => {
+                        throw new Error(err.error || '再ビルドに失敗しました');
+                    });
+                }
+                return response.json();
+            })
+            .then(data => {
+                console.log('Workspace rebuild initiated:', data);
+            })
+            .catch(error => {
+                console.error('Error rebuilding workspace:', error);
+                alert('エラー: ' + error.message);
+            });
+        }
+
+        // Download build log
+        function downloadBuildLog(id, name) {
+            window.open(`/api/workspaces/${id}/build-log`, '_blank');
         }
 
         // Logout

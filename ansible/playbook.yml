@@ -79,7 +79,14 @@
       loop:
         - {src: '../app/', dest: '{{ app_dir }}/app/'}
         - {src: '../docker/', dest: '{{ app_dir }}/'}
-        - {src: '../nginx/', dest: '{{ app_dir }}/nginx/'}
+
+    - name: Deploy nginx configuration from template
+      ansible.builtin.template:
+        src: ../nginx/nginx.conf
+        dest: "{{ app_dir }}/nginx/nginx.conf"
+        owner: ubuntu
+        group: ubuntu
+        mode: '0644'
 
     - name: Create environment file
       ansible.builtin.template:

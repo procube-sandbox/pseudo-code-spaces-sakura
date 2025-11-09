@@ -8,12 +8,14 @@ const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 const path = require('path');
 const crypto = require('crypto');
+const Docker = require('dockerode');
 
 const { logger, createUserLogger } = require('./logger');
 const db = require('./database');
 const workspaceManager = require('./workspace-manager');
 const workspaceEvents = require('./workspace-events');
 
+const docker = new Docker();
 const app = express();
 const PORT = process.env.PORT || 3000;
 const DOMAIN = process.env.DOMAIN;
@@ -371,9 +373,30 @@ app.delete('/api/workspaces/:id', ensureAuthenticatedAPI, async (req, res) => {
     // Async deletion
     (async () => {
       try {
-        // Stop and remove container
+        // Stop and remove container (only if it exists)
         if (workspace.container_id) {
-          await workspaceManager.deleteWorkspace(workspace.container_id);
+          try {
+            await workspaceManager.deleteWorkspace(workspace.container_id);
+          } catch (error) {
+            // Container might not exist if build failed - log but continue with deletion
+            userLogger.warn({ workspace: workspace.name, containerId: workspace.container_id, error: error.message }, 'Container not found or already removed, continuing with deletion');
+            
+            // Manually clean up workspace directory and nginx config since container doesn't exist
+            try {
+              await workspaceManager.cleanupWorkspaceFiles(req.user.username, workspace.name);
+              userLogger.info({ workspace: workspace.name }, 'Workspace files cleaned up manually');
+            } catch (cleanupError) {
+              userLogger.warn({ workspace: workspace.name, error: cleanupError.message }, 'Failed to clean up workspace files');
+            }
+          }
+        } else {
+          // No container ID - just clean up workspace directory
+          try {
+            await workspaceManager.cleanupWorkspaceFiles(req.user.username, workspace.name);
+            userLogger.info({ workspace: workspace.name }, 'Workspace files cleaned up (no container)');
+          } catch (cleanupError) {
+            userLogger.warn({ workspace: workspace.name, error: cleanupError.message }, 'Failed to clean up workspace files');
+          }
         }
         
         // Remove from database
@@ -518,6 +541,126 @@ app.post('/api/workspaces/:id/stop', ensureAuthenticatedAPI, async (req, res) =>
     });
   } catch (error) {
     userLogger.error({ error: error.message, stack: error.stack }, 'Error initiating workspace stop');
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Rebuild workspace
+app.post('/api/workspaces/:id/rebuild', ensureAuthenticatedAPI, async (req, res) => {
+  const userLogger = createUserLogger(req.user.username);
+  
+  try {
+    const workspace = db.getWorkspace(req.params.id);
+    
+    if (!workspace || workspace.user_id !== req.user.id) {
+      userLogger.warn({ workspaceId: req.params.id }, 'Workspace not found or access denied');
+      return res.status(404).json({ error: 'Workspace not found' });
+    }
+    
+    // Check if workspace is in a processing state (except failed)
+    const processingStates = ['building', 'starting', 'stopping', 'deleting'];
+    if (processingStates.includes(workspace.status)) {
+      userLogger.warn({ workspace: workspace.name, status: workspace.status }, 'Workspace is currently processing');
+      return res.status(409).json({ error: `Workspace is currently ${workspace.status}` });
+    }
+    
+    userLogger.info({ workspace: workspace.name, containerId: workspace.container_id }, 'Starting workspace rebuild');
+    
+    // Update status to building
+    db.updateWorkspaceStatus(req.params.id, 'building');
+    const buildingWorkspace = db.getWorkspace(req.params.id);
+    workspaceEvents.publish(req.user.id, buildingWorkspace, 'updated');
+    
+    // Return immediately
+    res.json({ success: true, status: 'building' });
+    
+    // Async rebuild
+    (async () => {
+      try {
+        // Stop and remove old container if exists
+        if (workspace.container_id) {
+          try {
+            const docker = new Docker();
+            const container = docker.getContainer(workspace.container_id);
+            
+            // Stop container
+            try {
+              await container.stop({ t: 10 });
+              userLogger.info({ workspace: workspace.name, containerId: workspace.container_id }, 'Container stopped');
+            } catch (error) {
+              if (error.statusCode !== 304) { // 304 = already stopped
+                throw error;
+              }
+            }
+            
+            // Remove container
+            await container.remove({ force: true });
+            userLogger.info({ workspace: workspace.name }, 'Old container removed');
+          } catch (error) {
+            userLogger.warn({ workspace: workspace.name, error: error.message }, 'Error removing old container (continuing)');
+          }
+        }
+        
+        // Rebuild workspace (workspace directory already exists, just rebuild container)
+        const newWorkspace = await workspaceManager.buildWorkspace(
+          req.user.username,
+          workspace.name,
+          {}, // envVars - TODO: store and reuse
+          req.params.id
+        );
+        
+        // Update database with new container ID
+        db.updateWorkspaceContainer(req.params.id, newWorkspace.containerId, 'running');
+        const updatedWorkspace = db.getWorkspace(req.params.id);
+        workspaceEvents.publish(req.user.id, updatedWorkspace, 'updated');
+        
+        userLogger.info({ workspace: workspace.name }, 'Workspace rebuilt successfully');
+      } catch (error) {
+        userLogger.error({ workspace: workspace.name, error: error.message, stack: error.stack }, 'Error rebuilding workspace');
+        
+        db.updateWorkspaceStatus(req.params.id, 'failed');
+        const failedWorkspace = db.getWorkspace(req.params.id);
+        workspaceEvents.publish(req.user.id, failedWorkspace, 'updated');
+      }
+    })().catch(err => {
+      userLogger.error({ error: err.message, stack: err.stack }, 'Unhandled error in async rebuild');
+    });
+  } catch (error) {
+    userLogger.error({ error: error.message, stack: error.stack }, 'Error initiating workspace rebuild');
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Download build log
+app.get('/api/workspaces/:id/build-log', ensureAuthenticatedAPI, async (req, res) => {
+  const userLogger = createUserLogger(req.user.username);
+  
+  try {
+    const workspace = db.getWorkspace(req.params.id);
+    
+    if (!workspace || workspace.user_id !== req.user.id) {
+      userLogger.warn({ workspaceId: req.params.id }, 'Workspace not found or access denied');
+      return res.status(404).json({ error: 'Workspace not found' });
+    }
+    
+    const fs = require('fs').promises;
+    const path = require('path');
+    const buildLogFile = path.join('/home', req.user.username, 'buildlogs', `${workspace.name}.log`);
+    
+    try {
+      const logContent = await fs.readFile(buildLogFile, 'utf8');
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${workspace.name}-build.log"`);
+      res.send(logContent);
+      userLogger.debug({ workspace: workspace.name }, 'Build log downloaded');
+    } catch (error) {
+      if (error.code === 'ENOENT') {
+        return res.status(404).json({ error: 'Build log not found' });
+      }
+      throw error;
+    }
+  } catch (error) {
+    userLogger.error({ error: error.message, stack: error.stack }, 'Error downloading build log');
     res.status(500).json({ error: error.message });
   }
 });
