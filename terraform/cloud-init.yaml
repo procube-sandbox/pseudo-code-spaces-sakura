@@ -1,5 +1,5 @@
 #cloud-config
-# Cloud-init configuration for Pseudo CodeSpaces
+# Cloud-init configuration for Workspaces
 
 # ユーザー設定
 users:
@@ -86,7 +86,7 @@ runcmd:
   - netfilter-persistent save
   
   # Create directory for application
-  - mkdir -p /opt/pseudo-codespaces
-  - chown ubuntu:ubuntu /opt/pseudo-codespaces
+  - mkdir -p /opt/workspaces
+  - chown ubuntu:ubuntu /opt/workspaces
 
 final_message: "Cloud-init completed. System is ready for Ansible provisioning."

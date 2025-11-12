@@ -2,7 +2,7 @@
 set -e
 
 echo "Installing system packages..."
-sudo apt-get update && sudo apt-get install -y iputils-ping
+sudo apt-get update && sudo apt-get install -y netcat-traditional iputils-ping
 
 echo "Installing Ansible..."
 pip install --user ansible ansible-lint

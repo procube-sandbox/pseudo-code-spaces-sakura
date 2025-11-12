@@ -5,7 +5,7 @@
 set -e
 
 DOMAIN="${1:-}"
-APP_DIR="/opt/pseudo-codespaces"
+APP_DIR="/opt/workspaces"
 LOG_FILE="/var/log/certbot-renewal.log"
 
 if [ -z "$DOMAIN" ]; then

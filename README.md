@@ -1,4 +1,4 @@
-# Pseudo CodeSpaces on Sakura Cloud
+# Workspaces on Sakura Cloud
 
 さくらのクラウド上でGitHub CodeSpaces風のクラウド開発環境を提供するサービスです。
 
@@ -21,7 +21,7 @@
 │           Sakura Cloud Server (Ubuntu)          │
 │                                                  │
 │  ┌────────────┐  ┌──────────────────────────┐   │
-│  │   Nginx    │  │  Pseudo CodeSpaces App   │   │
+│  │   Nginx    │  │  Workspaces App   │   │
 │  │  (Reverse  │──│  (Node.js + Express)     │   │
 │  │   Proxy)   │  │  - GitHub OAuth          │   │
 │  │  + SSL/TLS │  │  - Workspace Management  │   │
@@ -57,7 +57,7 @@ GitHubで新しいOAuth Appを作成してください：
 
 1. GitHub Settings → Developer settings → OAuth Apps → New OAuth App
 2. 以下の情報を設定：
-   - Application name: `Pseudo CodeSpaces`
+   - Application name: `Workspaces`
    - Homepage URL: `https://your-domain.com`
    - Authorization callback URL: `https://your-domain.com/auth/github/callback`
 3. Client IDとClient Secretを控えておく
@@ -332,7 +332,7 @@ Error: API authentication failed
 
 ### ワークスペースが起動しない
 
-- サーバーのログを確認: `ssh ubuntu@your-server "docker logs pseudo-codespaces-app"`
+- サーバーのログを確認: `ssh ubuntu@your-server "docker logs workspaces-app"`
 - Docker Daemonが実行中か確認: `ssh ubuntu@your-server "systemctl status docker"`
 
 ### Nginxリロードが失敗する
@@ -364,7 +364,7 @@ sudo /usr/local/bin/renew-cert.sh your-domain.com
 ```bash
 ssh ubuntu@your-server
 sudo certbot renew
-sudo cp /etc/letsencrypt/live/your-domain.com/*.pem /opt/pseudo-codespaces/ssl/
+sudo cp /etc/letsencrypt/live/your-domain.com/*.pem /opt/workspaces/ssl/
 docker exec nginx nginx -s reload
 ```
 
@@ -390,13 +390,13 @@ sudo certbot certificates
 
 ```bash
 ssh ubuntu@your-server
-cp /opt/pseudo-codespaces/app/data/database.db ~/backup/
+cp /opt/workspaces/app/data/database.db ~/backup/
 ```
 
 ### アップデート
 
 ```bash
-cd /opt/pseudo-codespaces
+cd /opt/workspaces
 git pull
 docker compose down
 docker compose up -d --build

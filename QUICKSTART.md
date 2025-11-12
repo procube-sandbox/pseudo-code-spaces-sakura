@@ -1,8 +1,8 @@
-# Pseudo CodeSpaces - クイックスタートガイド
+# Workspaces - クイックスタートガイド
 
 ## 概要
 
-このガイドでは、最短でPseudo CodeSpacesをデプロイする手順を説明します。
+このガイドでは、最短でWorkspacesをデプロイする手順を説明します。
 
 ## 前提条件チェックリスト
 
@@ -17,7 +17,7 @@
 2. "OAuth Apps" → "New OAuth App" をクリック
 3. 以下を入力：
    ```
-   Application name: Pseudo CodeSpaces
+   Application name: Workspaces
    Homepage URL: https://your-domain.com
    Authorization callback URL: https://your-domain.com/auth/github/callback
    ```
@@ -130,7 +130,7 @@ nano inventory.ini
 以下のように編集：
 
 ```ini
-[pseudo_codespaces]
+[workspaces]
 <IPアドレス> ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/id_rsa
 ```
 
@@ -201,7 +201,7 @@ ssh ubuntu@your-server
 sudo systemctl status docker
 docker ps
 docker logs nginx
-docker logs pseudo-codespaces-app
+docker logs workspaces-app
 ```
 
 ### GitHub OAuth認証が失敗する

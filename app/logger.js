@@ -13,7 +13,7 @@ const logger = pino({
   },
   timestamp: pino.stdTimeFunctions.isoTime,
   base: {
-    service: 'pseudo-codespaces',
+    service: 'workspaces',
     pid: process.pid,
   },
 });

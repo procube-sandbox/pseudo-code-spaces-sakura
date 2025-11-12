@@ -1,11 +1,11 @@
 #!/bin/bash
 set -e
 
-# Full redeploy script for Pseudo CodeSpaces
+# Full redeploy script for Workspaces
 # This script performs a complete rebuild of the infrastructure
 
 echo "========================================="
-echo "Full Redeploy - Pseudo CodeSpaces"
+echo "Full Redeploy - Workspaces"
 echo "========================================="
 echo ""
 
@@ -151,10 +151,10 @@ fi
 echo -e "${YELLOW}Step 10: Updating Ansible inventory${NC}"
 cd ../ansible
 cat > inventory.ini << EOF
-[pseudo_codespaces]
+[workspaces]
 ${SERVER_IP} ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/id_rsa
 
-[pseudo_codespaces:vars]
+[workspaces:vars]
 ansible_python_interpreter=/usr/bin/python3
 EOF
 

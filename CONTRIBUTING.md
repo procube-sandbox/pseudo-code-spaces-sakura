@@ -1,4 +1,4 @@
-# Contributing to Pseudo CodeSpaces
+# Contributing to Workspaces
 
 このプロジェクトへの貢献を歓迎します！
 

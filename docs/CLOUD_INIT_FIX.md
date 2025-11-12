@@ -51,7 +51,7 @@ Server (cloud-init実行、IPアドレス正常付与)
 # Packet Filter - DHCPを許可してIPアドレス付与を可能にする
 resource "sakuracloud_packet_filter" "main" {
   name        = "${var.server_name}-filter"
-  description = "Packet filter for Pseudo CodeSpaces with DHCP support"
+  description = "Packet filter for Workspaces with DHCP support"
 
   # DHCP (重要: cloud-initイメージでIPアドレスを取得するために必須)
   expression {

@@ -27,7 +27,7 @@ variable "ssh_public_key" {
 variable "server_name" {
   description = "Server name"
   type        = string
-  default     = "pseudo-codespaces"
+  default     = "workspaces"
 }
 
 variable "server_core" {

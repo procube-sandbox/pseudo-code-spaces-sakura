@@ -647,8 +647,8 @@ app.post('/api/workspaces/:id/rebuild', ensureAuthenticatedAPI, async (req, res)
   }
 });
 
-// Download build log
-app.get('/api/workspaces/:id/build-log', ensureAuthenticatedAPI, async (req, res) => {
+// Download build log (supports both GET and HEAD)
+const buildLogHandler = async (req, res) => {
   const userLogger = createUserLogger(req.user.username);
   
   try {
@@ -659,18 +659,21 @@ app.get('/api/workspaces/:id/build-log', ensureAuthenticatedAPI, async (req, res
       return res.status(404).json({ error: 'Workspace not found' });
     }
     
-    const fs = require('fs').promises;
-    const path = require('path');
-    const buildLogFile = path.join('/home', req.user.username, 'buildlogs', `${workspace.name}.log`);
-    
     try {
-      const logContent = await fs.readFile(buildLogFile, 'utf8');
+      const logContent = await workspaceManager.readBuildLog(workspace.name);
       res.setHeader('Content-Type', 'text/plain; charset=utf-8');
       res.setHeader('Content-Disposition', `attachment; filename="${workspace.name}-build.log"`);
+      
+      // For HEAD requests, just send headers without body
+      if (req.method === 'HEAD') {
+        res.setHeader('Content-Length', Buffer.byteLength(logContent, 'utf8'));
+        return res.end();
+      }
+      
       res.send(logContent);
       userLogger.debug({ workspace: workspace.name }, 'Build log downloaded');
     } catch (error) {
-      if (error.code === 'ENOENT') {
+      if (error.message === 'Build log not found') {
         return res.status(404).json({ error: 'Build log not found' });
       }
       throw error;
@@ -679,7 +682,10 @@ app.get('/api/workspaces/:id/build-log', ensureAuthenticatedAPI, async (req, res
     userLogger.error({ error: error.message, stack: error.stack }, 'Error downloading build log');
     res.status(500).json({ error: error.message });
   }
-});
+};
+
+app.get('/api/workspaces/:id/build-log', ensureAuthenticatedAPI, buildLogHandler);
+app.head('/api/workspaces/:id/build-log', ensureAuthenticatedAPI, buildLogHandler);
 
 // Get current user info API
 app.get('/api/user', ensureAuthenticatedAPI, (req, res) => {
@@ -702,5 +708,5 @@ db.initialize();
 
 // Start server
 app.listen(PORT, '0.0.0.0', () => {
-  logger.info({ port: PORT, domain: DOMAIN }, 'Pseudo CodeSpaces server started');
+  logger.info({ port: PORT, domain: DOMAIN }, 'Workspaces server started');
 });

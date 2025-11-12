@@ -14,13 +14,13 @@ services:
       - app
     restart: unless-stopped
     networks:
-      - pseudo-codespaces
+      - internal
 
   app:
     build:
       context: ./app
       dockerfile: Dockerfile
-    container_name: pseudo-codespaces-app
+    container_name: workspaces-app
     environment:
       - NODE_ENV=${NODE_ENV:-production}
       - DOMAIN=${DOMAIN}
@@ -35,13 +35,13 @@ services:
       - ./nginx/conf.d:/opt/nginx-config:rw
     restart: unless-stopped
     networks:
-      - pseudo-codespaces
+      - internal
 
 volumes:
   nginx-cache:
 
 networks:
-  pseudo-codespaces:
+  internal:
     driver: bridge
     ipam:
       driver: default

@@ -24,13 +24,13 @@ Playbookがスキップされ、何も実行されない。
 `ansible/inventory.ini`が正しく設定されているか確認：
 
 ```ini
-[pseudo_codespaces]
+[workspaces]
 <IPアドレス> ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/id_rsa
 ```
 
 例：
 ```ini
-[pseudo_codespaces]
+[workspaces]
 133.125.84.224 ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/id_rsa
 ```
 
@@ -54,7 +54,7 @@ ANSIBLE_CONFIG=ansible.cfg ansible-playbook -i inventory.ini playbook.yml --list
 期待される出力：
 ```
 playbook: playbook.yml
-  play #1 (all): Setup Pseudo CodeSpaces Server TAGS: []
+  play #1 (all): Setup Workspaces Server TAGS: []
     pattern: ['all']
     hosts (1):
       133.125.84.224

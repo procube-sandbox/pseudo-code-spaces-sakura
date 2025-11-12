@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dashboard - Pseudo CodeSpaces</title>
+    <title>Dashboard - Workspaces</title>
     <style>
         * {
             margin: 0;
@@ -401,7 +401,7 @@
     <div class="container">
         <div class="header">
             <div class="header-logo">
-                <img src="/logo.svg" alt="Pseudo CodeSpaces Logo">
+                <img src="/logo.svg" alt="Workspaces Logo">
             </div>
             <div class="header-title">ダッシュボード</div>
             <div class="header-right">
@@ -734,8 +734,25 @@
         }
 
         // Open workspace
-        function openWorkspace(name) {
-            window.open(`/${currentUser.username}/workspaces/${name}/?folder=/workspaces/${name}`, '_blank');
+        async function openWorkspace(name) {
+            try {
+                // Check authentication by fetching user info
+                const response = await fetch('/api/user');
+                if (response.status === 401) {
+                    alert('セッションが切れています。ログインし直してください');
+                    window.location.href = '/';
+                    return;
+                }
+                if (!response.ok) {
+                    throw new Error('認証の確認に失敗しました');
+                }
+                
+                // Authentication confirmed, open workspace
+                window.open(`/${currentUser.username}/workspaces/${name}/?folder=/workspaces/${name}`, '_blank');
+            } catch (error) {
+                console.error('Error opening workspace:', error);
+                alert('エラー: ' + error.message);
+            }
         }
 
         // Start workspace
@@ -860,8 +877,34 @@
         }
 
         // Download build log
-        function downloadBuildLog(id, name) {
-            window.open(`/api/workspaces/${id}/build-log`, '_blank');
+        async function downloadBuildLog(id, name) {
+            try {
+                // Check authentication and file availability with HEAD request
+                const response = await fetch(`/api/workspaces/${id}/build-log`, {
+                    method: 'HEAD'
+                });
+                
+                if (response.status === 401) {
+                    alert('セッションが切れています。ログインし直してください');
+                    window.location.href = '/';
+                    return;
+                }
+                
+                if (response.status === 404) {
+                    alert('ビルドログが見つかりません');
+                    return;
+                }
+                
+                if (!response.ok) {
+                    throw new Error('ログのダウンロードに失敗しました');
+                }
+                
+                // Authentication and file confirmed, open download
+                window.open(`/api/workspaces/${id}/build-log`, '_blank');
+            } catch (error) {
+                console.error('Error downloading build log:', error);
+                alert('エラー: ' + error.message);
+            }
         }
 
         // Logout

@@ -1,11 +1,11 @@
 #!/bin/bash
 set -e
 
-# Destroy script for Pseudo CodeSpaces
+# Destroy script for Workspaces
 # This script completely destroys the infrastructure
 
 echo "========================================="
-echo "DESTROY - Pseudo CodeSpaces"
+echo "DESTROY - Workspaces"
 echo "========================================="
 echo ""
 

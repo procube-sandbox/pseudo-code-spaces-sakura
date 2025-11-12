@@ -247,7 +247,7 @@ Devcontainer CLIを使用してコンテナをビルドし、起動します。
 **主な処理**:
 - `devcontainer up --skip-post-create` の実行
 - デフォルトイメージへのフォールバック（エラー時）
-- ネットワーク接続（`pseudo-codespaces_pseudo-codespaces`）
+- ネットワーク接続（`workspaces_internal`）
 - bridgeネットワークからの切断
 - UID 1000ユーザの確認・作成
 - code-serverのインストール（root）と起動（UID 1000）
@@ -304,7 +304,7 @@ location /{username}/workspaces/{workspaceName}/ {
 
 2. **ユーザー権限**: すべてのワークスペース操作はcodespaceユーザ（UID 1000）で実行されます
 
-3. **ネットワーク**: カスタムDockerネットワーク`pseudo-codespaces_pseudo-codespaces`を使用
+3. **ネットワーク**: カスタムDockerネットワーク`workspaces_internal`を使用
 
 ## ログとデバッグ
 

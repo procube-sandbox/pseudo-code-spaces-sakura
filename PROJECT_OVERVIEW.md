@@ -1,4 +1,4 @@
-# Pseudo CodeSpaces on Sakura Cloud - Project Overview
+# Workspaces on Sakura Cloud - Project Overview
 
 ## プロジェクト完成
 

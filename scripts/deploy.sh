@@ -3,7 +3,7 @@
 
 set -e
 
-echo "🚀 Pseudo CodeSpaces デプロイスクリプト"
+echo "🚀 Workspaces デプロイスクリプト"
 echo "========================================"
 
 # 環境変数チェック
@@ -87,27 +87,28 @@ deploy_terraform() {
         echo "サーバーIPアドレス: $SERVER_IP"
         echo ""
         
-        # サーバー起動待機（SSHで確認しながら）
-        echo "⏳ サーバーの起動を待っています..."
-        echo "   SSH接続で確認中（最大10分間）..."
+        # サーバー接続確認（段階的チェック）
+        echo "⏳ サーバーの接続確認を開始します..."
         echo ""
         
-        MAX_ATTEMPTS=120  # 10分間（5秒間隔で120回）
-        ATTEMPT=0
-        SERVER_UP=false
+        # ステップ1: SSHポートの確認（ncコマンド）
+        echo "🔍 ステップ1: SSHポート（22番）の確認中..."
+        MAX_PORT_ATTEMPTS=12  # 1分間（5秒間隔で12回）
+        PORT_ATTEMPT=0
+        PORT_OPEN=false
         
-        while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
-            ATTEMPT=$((ATTEMPT + 1))
-            ELAPSED=$((ATTEMPT * 5))
+        while [ $PORT_ATTEMPT -lt $MAX_PORT_ATTEMPTS ]; do
+            PORT_ATTEMPT=$((PORT_ATTEMPT + 1))
+            ELAPSED=$((PORT_ATTEMPT * 5))
             
             # 進捗表示
-            printf "\r   経過時間: %d秒 / 600秒 - SSH試行 %d/%d..." $ELAPSED $ATTEMPT $MAX_ATTEMPTS
+            printf "\r   経過時間: %d秒 / 60秒 - ポート試行 %d/%d..." $ELAPSED $PORT_ATTEMPT $MAX_PORT_ATTEMPTS
             
-            # SSHテスト（タイムアウト5秒）
-            if ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes ubuntu@"$SERVER_IP" exit 2>/dev/null; then
+            # ncコマンドでポート22の確認（タイムアウト3秒）
+            if nc -z -w 3 "$SERVER_IP" 22 2>/dev/null; then
                 echo ""
-                echo "✅ サーバーが起動しました！（${ELAPSED}秒後）"
-                SERVER_UP=true
+                echo "✅ SSHポートが開いています！（${ELAPSED}秒後）"
+                PORT_OPEN=true
                 break
             fi
             
@@ -116,16 +117,89 @@ deploy_terraform() {
         
         echo ""
         
-        if [ "$SERVER_UP" = false ]; then
-            echo "⚠️  タイムアウト: 10分経ってもサーバーが応答しません"
+        if [ "$PORT_OPEN" = false ]; then
+            echo "❌ エラー: 1分経ってもSSHポートが開きません"
             echo ""
             echo "Webコンソールで確認してください:"
             echo "  https://secure.sakura.ad.jp/cloud/"
             echo ""
             echo "考えられる原因:"
-            echo "  - サーバーがまだ起動処理中（cloud-initに時間がかかる）"
-            echo "  - SSH鍵認証の問題"
+            echo "  - サーバーがまだ起動処理中"
             echo "  - ネットワーク設定の問題"
+            echo "  - SSHサービスが起動していない"
+            echo ""
+            echo "Webコンソールからログイン:"
+            echo "  ユーザー名: ubuntu"
+            echo "  パスワード: TempPassword123!"
+            echo ""
+            echo "確認コマンド:"
+            echo "  sudo systemctl status sshd"
+            echo "  ip a show ens3"
+            exit 1
+        fi
+        
+        # ステップ2: SSH接続とcloud-init状態確認
+        echo ""
+        echo "🔍 ステップ2: SSH接続とcloud-init状態の確認中..."
+        MAX_CLOUD_ATTEMPTS=12  # 1分間（5秒間隔で12回）
+        CLOUD_ATTEMPT=0
+        CLOUD_INIT_DONE=false
+        
+        while [ $CLOUD_ATTEMPT -lt $MAX_CLOUD_ATTEMPTS ]; do
+            CLOUD_ATTEMPT=$((CLOUD_ATTEMPT + 1))
+            ELAPSED=$((CLOUD_ATTEMPT * 5))
+            
+            # 進捗表示
+            printf "\r   経過時間: %d秒 / 60秒 - cloud-init試行 %d/%d..." $ELAPSED $CLOUD_ATTEMPT $MAX_CLOUD_ATTEMPTS
+            
+            # SSH接続でcloud-init状態を確認
+            # 注意: スクリプト全体で `set -e` が有効なため、
+            # ssh が非0終了した場合にスクリプト全体が終了しないよう
+            # 一時的にエラーストップを無効化してから実行します。
+            set +e
+            CLOUD_STATUS=$(ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o BatchMode=yes ubuntu@"$SERVER_IP" "sudo cloud-init status" 2>&1)
+            SSH_EXIT_CODE=$?
+            set -e
+            
+            if [ $SSH_EXIT_CODE -ne 0 ]; then
+                echo ""
+                echo "❌ SSH接続エラー:"
+                echo "$CLOUD_STATUS"
+                echo ""
+                echo "Webコンソールで確認してください:"
+                echo "  https://secure.sakura.ad.jp/cloud/"
+                echo ""
+                echo "Webコンソールからログイン:"
+                echo "  ユーザー名: ubuntu"
+                echo "  パスワード: TempPassword123!"
+                exit 1
+            fi
+            
+            # cloud-init status の出力に "done" が含まれているかチェック
+            if echo "$CLOUD_STATUS" | grep -q "done"; then
+                echo ""
+                echo "✅ cloud-initが完了しました！（${ELAPSED}秒後）"
+                echo "cloud-init status: $CLOUD_STATUS"
+                CLOUD_INIT_DONE=true
+                break
+            fi
+            
+            sleep 5
+        done
+        
+        echo ""
+        
+        if [ "$CLOUD_INIT_DONE" = false ]; then
+            echo "❌ エラー: 1分経ってもcloud-initが完了しません"
+            echo ""
+            echo "現在のcloud-init状態: $CLOUD_STATUS"
+            echo ""
+            echo "Webコンソールで確認してください:"
+            echo "  https://secure.sakura.ad.jp/cloud/"
+            echo ""
+            echo "考えられる原因:"
+            echo "  - cloud-initの処理に時間がかかっている"
+            echo "  - cloud-initでエラーが発生している"
             echo ""
             echo "Webコンソールからログイン:"
             echo "  ユーザー名: ubuntu"
@@ -133,36 +207,13 @@ deploy_terraform() {
             echo ""
             echo "確認コマンド:"
             echo "  sudo cloud-init status"
-            echo "  ip a show ens3"
-            echo "  sudo systemctl status sshd"
-        else
-            # サーバーが起動したら、cloud-init完了を少し待つ
-            echo "⏳ cloud-initの完了を待っています（30秒）..."
-            sleep 30
+            echo "  sudo cloud-init logs"
+            echo "  sudo journalctl -u cloud-init"
+            exit 1
         fi
         
         echo ""
-        
-        # 接続テスト
-        echo "🔍 接続テスト中..."
-        if ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no ubuntu@"$SERVER_IP" "echo 'SSH connection test'" 2>&1 | grep -q "SSH connection test"; then
-            echo "✅ SSH接続成功"
-            
-            # cloud-init状態確認
-            echo ""
-            echo "cloud-init状態確認中..."
-            ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no ubuntu@"$SERVER_IP" "sudo cloud-init status" 2>&1 || echo "⚠️  cloud-init状態を確認できませんでした"
-        else
-            echo "⚠️  SSH接続失敗"
-            echo ""
-            echo "まだサーバーが起動中の可能性があります。"
-            echo "Webコンソールから確認できます:"
-            echo "  ユーザー名: ubuntu"
-            echo "  パスワード: TempPassword123!"
-            echo ""
-            echo "ログイン後、必ずパスワードを変更してください:"
-            echo "  sudo passwd ubuntu"
-        fi
+        echo "✅ サーバーの接続確認が完了しました"
         
         echo ""
         echo "次のステップ:"
@@ -174,10 +225,10 @@ deploy_terraform() {
         # Ansibleインベントリの自動更新
         cd ../ansible
         cat > inventory.ini << EOF
-[pseudo_codespaces]
+[workspaces]
 ${SERVER_IP} ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/id_rsa
 
-[pseudo_codespaces:vars]
+[workspaces:vars]
 ansible_python_interpreter=/usr/bin/python3
 EOF
         echo ""

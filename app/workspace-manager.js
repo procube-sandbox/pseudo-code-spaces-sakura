@@ -3,7 +3,7 @@ const simpleGit = require('simple-git');
 const fs = require('fs').promises;
 const path = require('path');
 const yaml = require('js-yaml');
-const { exec } = require('child_process');
+const { exec, spawn } = require('child_process');
 const { promisify } = require('util');
 const { 
   logger, 
@@ -59,15 +59,37 @@ async function createWorkspace(username, workspaceName, repoUrl, envVars = {}, w
     wsLogger.warn({ error: err.message }, 'chown before clone failed (continuing)');
   }
 
+  // Prepare build log early for clone errors
+  await fs.mkdir(BUILD_LOGS_BASE_DIR, { recursive: true });
+  const buildLogFile = getBuildLogPath(workspaceName);
+  await fs.writeFile(buildLogFile, `Build log for ${workspaceName}\nStarted at: ${new Date().toISOString()}\n\n`);
+  
   // Clone repository as codespace user
   const cloneLogger = createActionLogger(username, workspaceName, 'clone-repository');
   cloneLogger.info({ repoUrl }, 'Cloning repository as codespace');
+  await writeToBuildLog(buildLogFile, `=== Cloning repository ===\n`);
+  await writeToBuildLog(buildLogFile, `Repository URL: ${repoUrl}\n`);
+  await writeToBuildLog(buildLogFile, `Workspace directory: ${workspaceDir}\n\n`);
+  
   try {
     // Use sudo -u codespace to perform the clone as the codespace user
     await execAsync(`sudo -u codespace git clone '${repoUrl}' '${workspaceDir}'`, { maxBuffer: 10 * 1024 * 1024 });
     cloneLogger.info('Repository cloned successfully');
+    await writeToBuildLog(buildLogFile, `✅ Repository cloned successfully\n\n`);
   } catch (err) {
     cloneLogger.error({ error: err.message, stderr: err.stderr, stdout: err.stdout }, 'Git clone failed');
+    await writeToBuildLog(buildLogFile, `\n=== GIT CLONE FAILED ===\n`);
+    await writeToBuildLog(buildLogFile, `Error: ${err.message}\n`);
+    if (err.stderr) {
+      await writeToBuildLog(buildLogFile, `\nStderr:\n${err.stderr}\n`);
+    }
+    if (err.stdout) {
+      await writeToBuildLog(buildLogFile, `\nStdout:\n${err.stdout}\n`);
+    }
+    await writeToBuildLog(buildLogFile, `\nPlease check:\n`);
+    await writeToBuildLog(buildLogFile, `  - Repository URL is correct and accessible\n`);
+    await writeToBuildLog(buildLogFile, `  - Repository is public or you have access rights\n`);
+    await writeToBuildLog(buildLogFile, `  - Network connectivity is working\n`);
     throw err;
   }
   
@@ -98,22 +120,32 @@ async function buildWithDevcontainerCLI(workspaceDir, username, workspaceName, e
   }
   
   const containerName = `workspace-${username}-${workspaceName}`;
-  const networkName = 'pseudo-codespaces_pseudo-codespaces';
+  const networkName = 'workspaces_internal';
   
   // Prepare build log
   await fs.mkdir(BUILD_LOGS_BASE_DIR, { recursive: true });
-  const buildLogFile = getBuildLogPath(username, workspaceName);
+  const buildLogFile = getBuildLogPath(workspaceName);
   
   if (retryWithDefault) {
     await writeToBuildLog(buildLogFile, `\n\n${'='.repeat(80)}\n`);
     await writeToBuildLog(buildLogFile, `RETRYING WITH DEFAULT IMAGE\n`);
     await writeToBuildLog(buildLogFile, `${'='.repeat(80)}\n\n`);
   } else {
-    await fs.writeFile(buildLogFile, `Build log for ${workspaceName}\nStarted at: ${new Date().toISOString()}\n\n`);
+    // Check if build log already exists (created during clone)
+    try {
+      await fs.access(buildLogFile);
+      // Log file exists, just append a separator
+      await writeToBuildLog(buildLogFile, `\n${'='.repeat(80)}\n`);
+      await writeToBuildLog(buildLogFile, `STARTING DEVCONTAINER BUILD\n`);
+      await writeToBuildLog(buildLogFile, `${'='.repeat(80)}\n\n`);
+    } catch (error) {
+      // Log file doesn't exist, create it (for rebuild scenarios)
+      await fs.writeFile(buildLogFile, `Build log for ${workspaceName}\nStarted at: ${new Date().toISOString()}\n\n`);
+    }
   }
   
   // Build devcontainer up command
-  let devcontainerCmd = `devcontainer up --workspace-folder "${workspaceDir}" --id-label pseudo-codespaces.workspace=${workspaceName} --id-label pseudo-codespaces.username=${username}`;
+  let devcontainerCmd = `devcontainer up --workspace-folder "${workspaceDir}" --id-label workspaces.workspace=${workspaceName} --id-label workspaces.username=${username}`;
   
   // If no devcontainer.json, create a temporary one with default image
   // OR if retrying after failure, replace existing devcontainer.json with default
@@ -196,29 +228,93 @@ async function buildWithDevcontainerCLI(workspaceDir, username, workspaceName, e
   }
   
   try {
-    const { stdout, stderr } = await execAsync(devcontainerCmd, {
-      maxBuffer: 10 * 1024 * 1024 // 10MB buffer for build output
+    // Use spawn instead of execAsync to stream output in real-time
+    const devcontainerArgs = [
+      'up',
+      '--workspace-folder', workspaceDir,
+      '--id-label', `workspaces.workspace=${workspaceName}`,
+      '--id-label', `workspaces.username=${username}`
+    ];
+    
+    buildLogger.info({ args: devcontainerArgs }, 'Spawning devcontainer CLI process');
+    await writeToBuildLog(buildLogFile, `Command: devcontainer ${devcontainerArgs.join(' ')}\n\n`);
+    
+    const devcontainerProcess = spawn('devcontainer', devcontainerArgs, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      shell: false
     });
     
-    // Write output to log file
-    await writeToBuildLog(buildLogFile, stdout);
-    if (stderr) {
-      await writeToBuildLog(buildLogFile, `\n=== stderr ===\n${stderr}`);
+    let stdoutBuffer = '';
+    let stderrBuffer = '';
+    let containerIdFromCLI = null;
+    
+    // Handle stdout - write to log in real-time and buffer for parsing
+    devcontainerProcess.stdout.on('data', (chunk) => {
+      const text = chunk.toString();
+      stdoutBuffer += text;
+      
+      // Write to build log immediately
+      writeToBuildLog(buildLogFile, text).catch(err => 
+        buildLogger.error({ error: err.message }, 'Failed to write stdout to build log')
+      );
+      
+      // Try to parse each line for container ID
+      const lines = text.split('\n');
+      for (const line of lines) {
+        if (line.trim()) {
+          try {
+            const json = JSON.parse(line);
+            if (json.containerId && !containerIdFromCLI) {
+              containerIdFromCLI = json.containerId;
+              buildLogger.info({ containerId: containerIdFromCLI }, 'Container ID found in output');
+            }
+          } catch (e) {
+            // Not JSON, that's fine
+          }
+        }
+      }
+    });
+    
+    // Handle stderr - write to log in real-time
+    devcontainerProcess.stderr.on('data', (chunk) => {
+      const text = chunk.toString();
+      stderrBuffer += text;
+      
+      // Write to build log immediately with stderr marker
+      writeToBuildLog(buildLogFile, `[stderr] ${text}`).catch(err => 
+        buildLogger.error({ error: err.message }, 'Failed to write stderr to build log')
+      );
+    });
+    
+    // Wait for process to complete
+    const exitCode = await new Promise((resolve, reject) => {
+      devcontainerProcess.on('close', resolve);
+      devcontainerProcess.on('error', reject);
+    });
+    
+    if (exitCode !== 0) {
+      const error = new Error(`devcontainer up exited with code ${exitCode}`);
+      error.stdout = stdoutBuffer;
+      error.stderr = stderrBuffer;
+      throw error;
     }
     
-    // Parse the output to get container ID
-    // devcontainer up outputs JSON with container info
-    const lines = stdout.split('\n');
-    let containerIdFromCLI = null;
-    for (const line of lines) {
-      try {
-        const json = JSON.parse(line);
-        if (json.containerId) {
-          containerIdFromCLI = json.containerId;
-          break;
+    buildLogger.info({ exitCode }, 'devcontainer up completed successfully');
+    await writeToBuildLog(buildLogFile, `\n=== devcontainer up completed (exit code: ${exitCode}) ===\n\n`);
+    
+    // Parse the stdout buffer to get container ID if not already found
+    if (!containerIdFromCLI) {
+      const lines = stdoutBuffer.split('\n');
+      for (const line of lines) {
+        try {
+          const json = JSON.parse(line);
+          if (json.containerId) {
+            containerIdFromCLI = json.containerId;
+            break;
+          }
+        } catch (e) {
+          // Not JSON, continue
         }
-      } catch (e) {
-        // Not JSON, continue
       }
     }
     
@@ -230,8 +326,8 @@ async function buildWithDevcontainerCLI(workspaceDir, username, workspaceName, e
       const containers = await docker.listContainers({ all: true });
       const container = containers.find(c => 
         c.Labels && 
-        c.Labels['pseudo-codespaces.workspace'] === workspaceName &&
-        c.Labels['pseudo-codespaces.username'] === username
+        c.Labels['workspaces.workspace'] === workspaceName &&
+        c.Labels['workspaces.username'] === username
       );
       
       if (!container) {
@@ -255,7 +351,7 @@ async function buildWithDevcontainerCLI(workspaceDir, username, workspaceName, e
     }
     
     // Connect container to our Docker network if not already connected
-    const networkName = 'pseudo-codespaces_pseudo-codespaces';
+    const networkName = 'workspaces_internal';
     let networks = containerInfo.NetworkSettings.Networks;
     
     if (!networks[networkName]) {
@@ -449,7 +545,7 @@ async function buildWithDevcontainerCLI(workspaceDir, username, workspaceName, e
     await new Promise(resolve => setTimeout(resolve, 5000));
     
     // Get updated container info after network changes and code-server installation
-    // This ensures we get the correct IP from the pseudo-codespaces network
+    // This ensures we get the correct IP from the workspaces network
     containerInfo = await containerObj.inspect();
     const containerIP = getContainerIP(containerInfo);
     const containerPort = 8080;
@@ -497,8 +593,8 @@ async function buildWithDevcontainerCLI(workspaceDir, username, workspaceName, e
         const containers = await docker.listContainers({ all: true });
         const container = containers.find(c => 
           c.Labels && 
-          c.Labels['pseudo-codespaces.workspace'] === workspaceName &&
-          c.Labels['pseudo-codespaces.username'] === username
+          c.Labels['workspaces.workspace'] === workspaceName &&
+          c.Labels['workspaces.username'] === username
         );
         
         if (container && container.State === 'running') {
@@ -640,18 +736,18 @@ function getCodeServerPort(containerInfo) {
 
 function getContainerIP(containerInfo) {
   const networks = containerInfo.NetworkSettings.Networks;
-  const networkName = 'pseudo-codespaces_pseudo-codespaces';
+  const networkName = 'workspaces_internal';
   
   // First priority: our custom network
   if (networks[networkName] && networks[networkName].IPAddress) {
-    logger.debug({ ip: networks[networkName].IPAddress, network: networkName }, 'Using IP from pseudo-codespaces network');
+    logger.debug({ ip: networks[networkName].IPAddress, network: networkName }, 'Using IP from workspaces network');
     return networks[networkName].IPAddress;
   }
   
   // Second priority: any non-bridge network
   for (const [netName, netInfo] of Object.entries(networks)) {
     if (netName !== 'bridge' && netInfo.IPAddress) {
-      logger.warn({ ip: netInfo.IPAddress, network: netName }, 'Using IP from non-bridge network (not pseudo-codespaces)');
+      logger.warn({ ip: netInfo.IPAddress, network: netName }, 'Using IP from non-bridge network (not workspaces)');
       return netInfo.IPAddress;
     }
   }
@@ -753,8 +849,8 @@ async function deleteWorkspace(containerId) {
     let containerInfo;
     try {
       containerInfo = await container.inspect();
-      username = containerInfo.Config.Labels['pseudo-codespaces.username'];
-      workspaceName = containerInfo.Config.Labels['pseudo-codespaces.workspace'];
+      username = containerInfo.Config.Labels['workspaces.username'];
+      workspaceName = containerInfo.Config.Labels['workspaces.workspace'];
       
       containerLogger.info({ username, workspaceName }, 'Container found, proceeding with deletion');
       
@@ -987,7 +1083,7 @@ async function cleanupWorkspaceFiles(username, workspaceName) {
 }
 
 // Helper function to get build log file path
-function getBuildLogPath(username, workspaceName) {
+function getBuildLogPath(workspaceName) {
   return path.join(BUILD_LOGS_BASE_DIR, `${workspaceName}.log`);
 }
 
@@ -997,6 +1093,20 @@ async function writeToBuildLog(logFile, message) {
     await fs.appendFile(logFile, message + '\n');
   } catch (error) {
     logger.error({ error: error.message, logFile }, 'Failed to write to build log');
+  }
+}
+
+// Helper function to read build log
+async function readBuildLog(workspaceName) {
+  const buildLogPath = getBuildLogPath(workspaceName);
+  try {
+    const content = await fs.readFile(buildLogPath, 'utf8');
+    return content;
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      throw new Error('Build log not found');
+    }
+    throw error;
   }
 }
 
@@ -1114,5 +1224,6 @@ module.exports = {
   startWorkspace,
   stopWorkspace,
   getBuildLogPath,
+  readBuildLog,
   cleanupWorkspaceFiles
 };

@@ -15,7 +15,7 @@ resource "sakuracloud_ssh_key" "main" {
 # Packet Filter (Firewall) - DHCPを許可してIPアドレス付与を可能にする
 resource "sakuracloud_packet_filter" "main" {
   name        = "${var.server_name}-filter"
-  description = "Packet filter for Pseudo CodeSpaces with DHCP support"
+  description = "Packet filter for Workspaces with DHCP support"
 
   # Fragment packets (重要: フラグメント化されたパケットの通信のために必須)
   # 参考: https://manual.sakura.ad.jp/cloud/network/packet-filter.html
@@ -183,7 +183,7 @@ resource "sakuracloud_server" "main" {
   name        = var.server_name
   core        = var.server_core
   memory      = var.server_memory
-  description = "Pseudo CodeSpaces Server"
+  description = "Workspaces Server"
 
   disks = [sakuracloud_disk.main.id]
 

@@ -21,7 +21,7 @@ output "service_url" {
 output "ansible_inventory" {
   description = "Ansible inventory entry"
   value       = <<-EOT
-    [pseudo_codespaces]
+    [workspaces]
     ${sakuracloud_server.main.ip_address} ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/id_rsa
   EOT
 }
